@@ -1,0 +1,992 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SQL 对比工具</title>
+  <style>
+    :root {
+      --blue: #337ab7;
+      --blue-dark: #286090;
+      --border: #d0d0d0;
+      --gutter: #f7f7f7;
+      --text: #222;
+      --muted: #888;
+      --left-diff: #ffd4d4;
+      --right-diff: #c8f1de;
+      --left-word: #ff8f8f;
+      --right-word: #82ddb9;
+      --keyword: #7d2eb9;
+      --object: #1a5fb4;
+      --string: #a65f00;
+      --number: #0b7777;
+      --comment: #777;
+      --operator: #444;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      min-width: 1080px;
+      color: var(--text);
+      background: #fff;
+      font-family: "Microsoft YaHei", Arial, sans-serif;
+      overflow: auto;
+    }
+
+    .page {
+      min-height: 100vh;
+      padding: 0 14px 14px;
+    }
+
+    .topbar {
+      position: sticky;
+      top: 0;
+      z-index: 10;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      height: 58px;
+      background: #fff;
+      border-bottom: 1px solid #eee;
+    }
+
+    .run-btn {
+      height: 38px;
+      padding: 0 18px;
+      border: 1px solid var(--blue-dark);
+      border-radius: 4px;
+      color: #fff;
+      background: var(--blue);
+      font-size: 16px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+
+    .run-btn:hover { background: var(--blue-dark); }
+
+    .run-btn:focus,
+    .clear-btn:focus {
+      outline: none;
+    }
+
+    .options {
+      position: absolute;
+      right: 10px;
+      display: flex;
+      align-items: center;
+      gap: 18px;
+      font-size: 15px;
+      font-weight: 700;
+    }
+
+    .options label {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      cursor: pointer;
+      user-select: none;
+    }
+
+    .options input {
+      width: 16px;
+      height: 16px;
+      margin: 0;
+      accent-color: var(--blue);
+    }
+
+    .clear-btn {
+      border: 0;
+      color: var(--blue);
+      background: transparent;
+      font-size: 24px;
+      font-weight: 800;
+      line-height: 1;
+      cursor: pointer;
+    }
+
+    .compare-layout {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+      min-height: calc(100vh - 72px);
+    }
+
+    .pane {
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .pane-title {
+      height: 54px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 16px;
+      font-weight: 700;
+    }
+
+    .editor-box {
+      flex: 1;
+      min-height: 520px;
+      height: calc(100vh - 140px);
+      border: 2px solid var(--border);
+      background: #fff;
+      overflow: auto;
+    }
+
+    .pane:first-child .editor-box {
+      border-right-width: 1px;
+    }
+
+    .pane:last-child .editor-box {
+      border-left-width: 1px;
+    }
+
+    .editor-grid {
+      min-height: 100%;
+      display: grid;
+      grid-template-columns: 42px minmax(0, 1fr);
+      align-items: stretch;
+      font-family: Consolas, "Courier New", monospace;
+      font-size: 15px;
+      line-height: 1.52;
+    }
+
+    .line-numbers {
+      min-height: 100%;
+      margin: 0;
+      padding: 8px 8px 8px 0;
+      border-right: 1px solid #e7e7e7;
+      color: var(--muted);
+      background: var(--gutter);
+      text-align: right;
+      white-space: pre;
+      user-select: none;
+    }
+
+    .editor {
+      min-height: 100%;
+      min-width: 0;
+      padding: 8px 14px 8px 8px;
+      outline: none;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+      word-break: break-word;
+      tab-size: 4;
+    }
+
+    .editor:empty::before {
+      content: attr(data-placeholder);
+      color: #aaa;
+    }
+
+    .line {
+      min-height: 1.52em;
+      padding: 0 6px;
+    }
+
+    .diff-left { background: var(--left-diff); }
+    .diff-right { background: var(--right-diff); }
+    .diff-word-left { background: var(--left-word); border-radius: 2px; }
+    .diff-word-right { background: var(--right-word); border-radius: 2px; }
+    .sql-keyword { color: var(--keyword); font-weight: 700; }
+    .sql-object { color: var(--object); }
+    .sql-string { color: var(--string); }
+    .sql-number { color: var(--number); }
+    .sql-comment { color: var(--comment); font-style: italic; }
+    .sql-operator { color: var(--operator); }
+
+    .middle { display: none; }
+
+    .arrow {
+      display: none;
+    }
+
+    .arrow.red { top: 98px; color: #e36d6d; }
+    .arrow.green { top: 132px; color: #59a88a; }
+
+    .toast {
+      position: fixed;
+      left: 50%;
+      bottom: 16px;
+      transform: translateX(-50%);
+      padding: 8px 14px;
+      border-radius: 20px;
+      color: #fff;
+      background: rgba(0, 0, 0, 0.78);
+      font-size: 13px;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.2s ease;
+    }
+
+    .toast.show { opacity: 1; }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <header class="topbar">
+      <button class="run-btn" id="compareBtn">格式化&比较SQL</button>
+      <div class="options">
+        <label>
+          <input type="checkbox" id="ignoreCaseToggle" />
+          忽略大小写
+        </label>
+        <button class="clear-btn" id="clearBtn" title="清空">×</button>
+      </div>
+    </header>
+
+    <section class="compare-layout">
+      <div class="pane">
+        <div class="pane-title">第一个SQL内容:</div>
+        <div class="editor-box" id="leftBox">
+          <div class="editor-grid">
+            <pre class="line-numbers" id="leftNums">1</pre>
+            <div class="editor" id="leftEditor" contenteditable="true" spellcheck="false" data-placeholder="粘贴第一个SQL"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="middle">
+        <div class="arrow red">→→</div>
+        <div class="arrow green">←←</div>
+      </div>
+
+      <div class="pane">
+        <div class="pane-title">第二个SQL内容:</div>
+        <div class="editor-box" id="rightBox">
+          <div class="editor-grid">
+            <pre class="line-numbers" id="rightNums">1</pre>
+            <div class="editor" id="rightEditor" contenteditable="true" spellcheck="false" data-placeholder="粘贴第二个SQL"></div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <div class="toast" id="toast"></div>
+
+  <script>
+    const leftEditor = document.getElementById('leftEditor');
+    const rightEditor = document.getElementById('rightEditor');
+    const leftNums = document.getElementById('leftNums');
+    const rightNums = document.getElementById('rightNums');
+    const leftBox = document.getElementById('leftBox');
+    const rightBox = document.getElementById('rightBox');
+    const compareBtn = document.getElementById('compareBtn');
+    const clearBtn = document.getElementById('clearBtn');
+    const ignoreCaseToggle = document.getElementById('ignoreCaseToggle');
+    const toast = document.getElementById('toast');
+
+    const keywordSet = new Set([
+      'SELECT', 'FROM', 'WHERE', 'GROUP', 'BY', 'ORDER', 'HAVING', 'LIMIT', 'OFFSET',
+      'INSERT', 'INTO', 'VALUES', 'UPDATE', 'SET', 'DELETE', 'CREATE', 'ALTER', 'DROP',
+      'TABLE', 'VIEW', 'INDEX', 'JOIN', 'LEFT', 'RIGHT', 'INNER', 'OUTER', 'FULL', 'ON',
+      'AND', 'OR', 'NOT', 'NULL', 'IS', 'IN', 'EXISTS', 'LIKE', 'BETWEEN', 'CASE',
+      'WHEN', 'THEN', 'ELSE', 'END', 'AS', 'DISTINCT', 'UNION', 'ALL', 'ASC', 'DESC',
+      'PRIMARY', 'KEY', 'FOREIGN', 'REFERENCES', 'DEFAULT', 'COMMENT', 'IF'
+    ]);
+
+    const functionSet = new Set([
+      'COUNT', 'SUM', 'AVG', 'MIN', 'MAX', 'ROUND', 'DATE_FORMAT', 'COALESCE', 'IFNULL',
+      'NVL', 'SUBSTR', 'SUBSTRING', 'CAST', 'CONVERT', 'CONCAT', 'UPPER', 'LOWER',
+      'TRIM', 'ROW_NUMBER', 'RANK', 'DENSE_RANK'
+    ]);
+
+    const clausePattern = [
+      'GROUP\\s+BY', 'ORDER\\s+BY', 'UNION\\s+ALL', 'LEFT\\s+JOIN', 'RIGHT\\s+JOIN',
+      'INNER\\s+JOIN', 'FULL\\s+JOIN', 'OUTER\\s+JOIN', 'INSERT\\s+INTO', 'DELETE\\s+FROM',
+      'SELECT', 'FROM', 'WHERE', 'HAVING', 'LIMIT', 'OFFSET', 'JOIN', 'ON', 'VALUES', 'SET', 'UPDATE'
+    ];
+    const clauseReg = new RegExp(`\\b(${clausePattern.join('|')})\\b`, 'gi');
+
+    function escapeHtml(text) {
+      return text
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+    }
+
+    function toastMsg(text) {
+      toast.textContent = text;
+      toast.classList.add('show');
+      clearTimeout(toastMsg.timer);
+      toastMsg.timer = setTimeout(() => toast.classList.remove('show'), 1200);
+    }
+
+    function plainText(editor) {
+      return editor.innerText
+        .replace(/\u00a0/g, ' ')
+        .replace(/\r\n/g, '\n')
+        .replace(/\r/g, '\n')
+        .trim();
+    }
+
+    function setLineNumbers(target, text) {
+      const count = Math.max(1, text ? text.split('\n').length : 1);
+      target.textContent = Array.from({ length: count }, (_, i) => i + 1).join('\n');
+    }
+
+    function splitByCommaOutside(value) {
+      const parts = [];
+      let current = '';
+      let depth = 0;
+      let quote = '';
+
+      for (let i = 0; i < value.length; i += 1) {
+        const char = value[i];
+        const prev = value[i - 1];
+
+        if (quote) {
+          current += char;
+          if (char === quote && prev !== '\\') quote = '';
+          continue;
+        }
+
+        if (char === '\'' || char === '"' || char === '`') {
+          quote = char;
+          current += char;
+          continue;
+        }
+
+        if (char === '(') depth += 1;
+        if (char === ')') depth = Math.max(0, depth - 1);
+
+        if (char === ',' && depth === 0) {
+          parts.push(current.trim() + ',');
+          current = '';
+          continue;
+        }
+
+        current += char;
+      }
+
+      if (current.trim()) parts.push(current.trim());
+      return parts;
+    }
+
+    function upperKeywordsOutsideQuotes(sql) {
+      let output = '';
+      let buffer = '';
+      let quote = '';
+
+      function flush() {
+        if (!buffer) return;
+        output += buffer.replace(/\b[A-Za-z_][A-Za-z0-9_]*\b/g, (match) => {
+          const upper = match.toUpperCase();
+          return keywordSet.has(upper) || functionSet.has(upper) ? upper : match;
+        });
+        buffer = '';
+      }
+
+      for (let i = 0; i < sql.length; i += 1) {
+        const char = sql[i];
+        const prev = sql[i - 1];
+
+        if (quote) {
+          buffer += char;
+          if (char === quote && prev !== '\\') {
+            quote = '';
+          }
+          continue;
+        }
+
+        if (char === '\'' || char === '"' || char === '`') {
+          flush();
+          quote = char;
+          buffer += char;
+          continue;
+        }
+
+        buffer += char;
+      }
+
+      flush();
+      return output;
+    }
+
+    function insertClauseBreaks(sql) {
+      let output = '';
+      let quote = '';
+      let i = 0;
+
+      while (i < sql.length) {
+        const char = sql[i];
+        const prev = sql[i - 1];
+
+        if (quote) {
+          output += char;
+          if (char === quote && prev !== '\\') quote = '';
+          i += 1;
+          continue;
+        }
+
+        if (char === '\'' || char === '"' || char === '`') {
+          quote = char;
+          output += char;
+          i += 1;
+          continue;
+        }
+
+        let matched = null;
+        for (const clause of clausePattern) {
+          const re = new RegExp(`^${clause}`, 'i');
+          const rest = sql.slice(i);
+          const m = rest.match(re);
+          if (m) {
+            matched = m[0].replace(/\s+/g, ' ');
+            break;
+          }
+        }
+
+        if (matched) {
+          const prevChar = output.trim().length ? '\n' : '';
+          output += prevChar + matched.toUpperCase();
+          i += matched.length;
+          continue;
+        }
+
+        output += char;
+        i += 1;
+      }
+
+      return output.replace(/\s+(AND|OR)\b/gi, '\n  $1');
+    }
+
+    function formatSql(sql) {
+      if (!sql.trim()) return '';
+
+      let text = sql
+        .replace(/\r\n/g, '\n')
+        .replace(/\r/g, '\n')
+        .replace(/[ \t\n]+/g, ' ')
+        .replace(/\s+,/g, ',')
+        .replace(/,\s*/g, ', ')
+        .replace(/\s*;\s*$/g, ';')
+        .trim();
+
+      text = upperKeywordsOutsideQuotes(text);
+      text = insertClauseBreaks(text);
+
+      const lines = [];
+      for (const raw of text.split('\n')) {
+        const line = raw.trim().replace(/\s+/g, ' ');
+        if (!line) continue;
+
+        if (/^SELECT\b/i.test(line)) {
+          lines.push('SELECT');
+          const body = line.replace(/^SELECT\b/i, '').trim();
+          splitByCommaOutside(body).forEach(part => {
+            if (part) lines.push('  ' + part);
+          });
+          continue;
+        }
+
+        if (/^(FROM|WHERE|GROUP BY|ORDER BY|HAVING|LIMIT|OFFSET|VALUES|SET|UPDATE|JOIN|LEFT JOIN|RIGHT JOIN|INNER JOIN|FULL JOIN|OUTER JOIN|ON|INSERT INTO|DELETE FROM)\b/i.test(line)) {
+          lines.push(line);
+          continue;
+        }
+
+        if (/^(AND|OR)\b/i.test(line)) {
+          lines.push('  ' + line);
+          continue;
+        }
+
+        lines.push(line);
+      }
+
+      return lines.join('\n').trim();
+    }
+
+    function highlightSql(text) {
+      let html = '';
+      let i = 0;
+      let expectObject = false;
+
+      function push(cls, value) {
+        html += cls ? `<span class="${cls}">${escapeHtml(value)}</span>` : escapeHtml(value);
+      }
+
+      while (i < text.length) {
+        const rest = text.slice(i);
+
+        const comment = rest.match(/^(--.*|\/\*[\s\S]*?\*\/)/);
+        if (comment) {
+          push('sql-comment', comment[0]);
+          i += comment[0].length;
+          continue;
+        }
+
+        const string = rest.match(/^('(?:''|[^'])*'|"(?:\\"|[^"])*"|`(?:``|[^`])*`)/);
+        if (string) {
+          push('sql-string', string[0]);
+          i += string[0].length;
+          continue;
+        }
+
+        const number = rest.match(/^\d+(?:\.\d+)?/);
+        if (number) {
+          push('sql-number', number[0]);
+          i += number[0].length;
+          continue;
+        }
+
+        const word = rest.match(/^[A-Za-z_][A-Za-z0-9_$]*/);
+        if (word) {
+          const raw = word[0];
+          const upper = raw.toUpperCase();
+          const next = text.slice(i + raw.length).replace(/^\s+/, '')[0];
+
+          if (functionSet.has(upper) || (next === '(' && ['COUNT', 'SUM', 'AVG', 'MIN', 'MAX', 'ROUND', 'COALESCE', 'IFNULL', 'NVL', 'SUBSTR', 'SUBSTRING', 'CAST', 'CONVERT', 'CONCAT', 'UPPER', 'LOWER', 'TRIM'].includes(upper))) {
+            push('sql-keyword', raw);
+            expectObject = false;
+          } else if (keywordSet.has(upper) || /^(GROUP\s+BY|ORDER\s+BY|LEFT\s+JOIN|RIGHT\s+JOIN|INNER\s+JOIN|FULL\s+JOIN|OUTER\s+JOIN|INSERT\s+INTO|DELETE\s+FROM)$/i.test(upper)) {
+            push('sql-keyword', raw);
+            expectObject = /^(FROM|JOIN|INTO|UPDATE|TABLE|DELETE)$/i.test(upper);
+          } else if (expectObject) {
+            const afterWord = text.slice(i + raw.length);
+            const dotted = afterWord.match(/^((?:\.[A-Za-z_][A-Za-z0-9_$]*)+)/);
+            if (dotted) {
+              const fullName = raw + dotted[0];
+              const lastDot = fullName.lastIndexOf('.');
+              push('', fullName.slice(0, lastDot + 1));
+              push('sql-object', fullName.slice(lastDot + 1));
+              i += fullName.length;
+              expectObject = false;
+              continue;
+            }
+            push('sql-object', raw);
+            expectObject = false;
+          } else {
+            push('', raw);
+          }
+
+          i += raw.length;
+          continue;
+        }
+
+        const symbol = text[i];
+        if (symbol === '.' || symbol === ',') {
+          push('', symbol);
+          i += 1;
+          continue;
+        }
+
+        if (symbol === ';') {
+          push('', symbol);
+          expectObject = false;
+          i += 1;
+          continue;
+        }
+
+        if (symbol === '(' || symbol === ')') {
+          push('', symbol);
+          i += 1;
+          continue;
+        }
+
+        if (/\s/.test(symbol)) {
+          html += symbol;
+          i += 1;
+          continue;
+        }
+
+        const operator = rest.match(/^(<=|>=|<>|!=|=|\+|-|\*|\/|<|>)/);
+        if (operator) {
+          push('sql-operator', operator[0]);
+          i += operator[0].length;
+          continue;
+        }
+
+        push('', symbol);
+        i += 1;
+      }
+
+      return html;
+    }
+
+    function lowerOutsideQuotes(text) {
+      let result = '';
+      let quote = '';
+
+      for (let i = 0; i < text.length; i += 1) {
+        const char = text[i];
+        const prev = text[i - 1];
+
+        if (quote) {
+          result += char;
+          if (char === quote && prev !== '\\') quote = '';
+          continue;
+        }
+
+        if (char === '\'' || char === '"' || char === '`') {
+          quote = char;
+          result += char;
+          continue;
+        }
+
+        result += char.toLowerCase();
+      }
+
+      return result;
+    }
+
+    function plainDiffKey(text, ignoreCase) {
+      return ignoreCase ? lowerOutsideQuotes(text.trim()) : text.trim();
+    }
+
+    function lineKind(line) {
+      const text = line.trim().toUpperCase();
+      if (!text) return 'blank';
+      if (text === 'SELECT') return 'select';
+      if (/^(FROM|WHERE|GROUP BY|ORDER BY|HAVING|LIMIT|OFFSET|VALUES|SET|UPDATE|INSERT INTO|DELETE FROM)\b/.test(text)) {
+        return text.split(/\s+/).slice(0, 2).join(' ');
+      }
+      if (/^(AND|OR)\b/.test(text)) return text.split(/\s+/)[0];
+      if (/^(LEFT JOIN|RIGHT JOIN|INNER JOIN|FULL JOIN|OUTER JOIN|JOIN|ON)\b/.test(text)) return 'join';
+      return 'expr';
+    }
+
+    function alignLines(leftLines, rightLines, ignoreCase) {
+      if (leftLines.length === rightLines.length) {
+        return { alignedLeft: leftLines, alignedRight: rightLines };
+      }
+
+      const leftKeys = leftLines.map(line => plainDiffKey(line, ignoreCase));
+      const rightKeys = rightLines.map(line => plainDiffKey(line, ignoreCase));
+      const n = leftLines.length;
+      const m = rightLines.length;
+      const dp = Array.from({ length: n + 1 }, () => Array(m + 1).fill(0));
+      const move = Array.from({ length: n + 1 }, () => Array(m + 1).fill(''));
+
+      for (let i = 0; i <= n; i += 1) dp[i][0] = i;
+      for (let j = 0; j <= m; j += 1) dp[0][j] = j;
+
+      for (let i = 1; i <= n; i += 1) {
+        for (let j = 1; j <= m; j += 1) {
+          const same = leftKeys[i - 1] === rightKeys[j - 1];
+          const sameKind = lineKind(leftLines[i - 1]) === lineKind(rightLines[j - 1]);
+          const replaceCost = same ? 0 : (sameKind ? 0.7 : 1.4);
+          const replace = dp[i - 1][j - 1] + replaceCost;
+          const remove = dp[i - 1][j] + 1;
+          const insert = dp[i][j - 1] + 1;
+          const best = Math.min(replace, remove, insert);
+          dp[i][j] = best;
+          move[i][j] = best === replace ? 'replace' : (best === remove ? 'remove' : 'insert');
+        }
+      }
+
+      const alignedLeft = [];
+      const alignedRight = [];
+      let i = n;
+      let j = m;
+
+      while (i > 0 || j > 0) {
+        const step = move[i][j];
+        if (i > 0 && j > 0 && step === 'replace') {
+          alignedLeft.unshift(leftLines[i - 1]);
+          alignedRight.unshift(rightLines[j - 1]);
+          i -= 1;
+          j -= 1;
+        } else if (i > 0 && (j === 0 || step === 'remove')) {
+          alignedLeft.unshift(leftLines[i - 1]);
+          alignedRight.unshift('');
+          i -= 1;
+        } else {
+          alignedLeft.unshift('');
+          alignedRight.unshift(rightLines[j - 1]);
+          j -= 1;
+        }
+      }
+
+      return { alignedLeft, alignedRight };
+    }
+
+    function diffTokens(text) {
+      const tokens = [];
+      let i = 0;
+
+      while (i < text.length) {
+        const rest = text.slice(i);
+        const quoted = rest.match(/^('(?:''|[^'])*'|"(?:\\"|[^"])*"|`(?:``|[^`])*`)/);
+        if (quoted) {
+          tokens.push(quoted[0]);
+          i += quoted[0].length;
+          continue;
+        }
+
+        const word = rest.match(/^[A-Za-z_][A-Za-z0-9_$]*/);
+        if (word) {
+          tokens.push(word[0]);
+          i += word[0].length;
+          continue;
+        }
+
+        const cn = rest.match(/^[\u4e00-\u9fff]+/);
+        if (cn) {
+          tokens.push(cn[0]);
+          i += cn[0].length;
+          continue;
+        }
+
+        const number = rest.match(/^\d+(?:\.\d+)?/);
+        if (number) {
+          tokens.push(number[0]);
+          i += number[0].length;
+          continue;
+        }
+
+        const space = rest.match(/^\s+/);
+        if (space) {
+          tokens.push(space[0]);
+          i += space[0].length;
+          continue;
+        }
+
+        tokens.push(text[i]);
+        i += 1;
+      }
+
+      return tokens;
+    }
+
+    function comparableToken(token, ignoreCase) {
+      if (!ignoreCase) return token;
+      return /^(['"`])/.test(token) ? token : token.toLowerCase();
+    }
+
+    function parseSqlStringToken(token) {
+      if (!/^(['"`])/.test(token)) return null;
+      const quote = token[0];
+      const sameEnd = token.endsWith(quote);
+      return {
+        quote,
+        open: quote,
+        inner: sameEnd ? token.slice(1, -1) : token.slice(1),
+        close: sameEnd ? quote : ''
+      };
+    }
+
+    function inlineCharDiffHtml(token, otherToken, cls) {
+      let start = 0;
+      while (start < token.length && start < otherToken.length && token[start] === otherToken[start]) {
+        start += 1;
+      }
+
+      let end = token.length - 1;
+      let otherEnd = otherToken.length - 1;
+      while (end >= start && otherEnd >= start && token[end] === otherToken[otherEnd]) {
+        end -= 1;
+        otherEnd -= 1;
+      }
+
+      return highlightSql(token.slice(0, start))
+        + (token.slice(start, end + 1) ? `<span class="${cls}">${highlightSql(token.slice(start, end + 1))}</span>` : '')
+        + highlightSql(token.slice(end + 1));
+    }
+
+    function inlineCharDiffHtmlByKey(token, otherToken, tokenKey, otherKey, cls) {
+      let start = 0;
+      while (start < tokenKey.length && start < otherKey.length && tokenKey[start] === otherKey[start]) {
+        start += 1;
+      }
+
+      let end = token.length - 1;
+      let otherEnd = otherToken.length - 1;
+      while (end >= start && otherEnd >= start && tokenKey[end] === otherKey[otherEnd]) {
+        end -= 1;
+        otherEnd -= 1;
+      }
+
+      return highlightSql(token.slice(0, start))
+        + (token.slice(start, end + 1) ? `<span class="${cls}">${highlightSql(token.slice(start, end + 1))}</span>` : '')
+        + highlightSql(token.slice(end + 1));
+    }
+
+    function stringWithInnerQuoteDiff(currentString, otherString, cls) {
+      const wrappers = ['"', "'", '`'];
+
+      for (const wrapper of wrappers) {
+        if (currentString.inner === wrapper + otherString.inner + wrapper) {
+          return `<span class="sql-string">${escapeHtml(currentString.open)}</span>`
+            + `<span class="${cls}">${escapeHtml(wrapper)}</span>`
+            + `<span class="sql-string">${escapeHtml(otherString.inner)}</span>`
+            + `<span class="${cls}">${escapeHtml(wrapper)}</span>`
+            + `<span class="sql-string">${escapeHtml(currentString.close)}</span>`;
+        }
+      }
+
+      return '';
+    }
+
+    function tokenDiffHtml(token, otherToken, cls, ignoreCase) {
+      if (!token) return '&nbsp;';
+      if (comparableToken(token, ignoreCase) === comparableToken(otherToken || '', ignoreCase)) {
+        return highlightSql(token);
+      }
+
+      if (/^(['"`])/.test(token) && /^(['"`])/.test(otherToken || '')) {
+        const currentString = parseSqlStringToken(token);
+        const otherString = parseSqlStringToken(otherToken);
+
+        if (currentString && otherString && currentString.quote === otherString.quote && currentString.inner === otherString.inner) {
+          return highlightSql(token);
+        }
+
+        if (currentString && otherString) {
+          const innerQuoteDiff = stringWithInnerQuoteDiff(currentString, otherString, cls);
+          if (innerQuoteDiff) return innerQuoteDiff;
+        }
+
+        if (currentString && otherString && currentString.inner === otherString.inner) {
+          return `<span class="${cls}">${escapeHtml(currentString.open)}</span>`
+            + `<span class="sql-string">${escapeHtml(currentString.inner)}</span>`
+            + `<span class="${cls}">${escapeHtml(currentString.close)}</span>`;
+        }
+
+        return inlineCharDiffHtml(token, otherToken, cls);
+      }
+
+      if (
+        (/^[\u4e00-\u9fff]+$/.test(token) && /^[\u4e00-\u9fff]+$/.test(otherToken || '')) ||
+        (/^[A-Za-z_][A-Za-z0-9_$]*$/.test(token) && /^[A-Za-z_][A-Za-z0-9_$]*$/.test(otherToken || '') && token.length === otherToken.length)
+      ) {
+        const tokenKey = comparableToken(token, ignoreCase);
+        const otherKey = comparableToken(otherToken, ignoreCase);
+        return inlineCharDiffHtmlByKey(token, otherToken, tokenKey, otherKey, cls);
+      }
+
+      return `<span class="${cls}">${highlightSql(token)}</span>`;
+    }
+
+    function charDiffHtml(line, otherLine, side, ignoreCase) {
+      if (!line && !otherLine) return '&nbsp;';
+      const lineKey = plainDiffKey(line, ignoreCase);
+      const otherKey = plainDiffKey(otherLine, ignoreCase);
+      if (lineKey === otherKey) return highlightSql(line) || '&nbsp;';
+
+      const cls = side === 'left' ? 'diff-word-left' : 'diff-word-right';
+      const leftTokens = diffTokens(line);
+      const rightTokens = diffTokens(otherLine);
+      const n = leftTokens.length;
+      const m = rightTokens.length;
+      const dp = Array.from({ length: n + 1 }, () => Array(m + 1).fill(0));
+
+      for (let i = n - 1; i >= 0; i -= 1) {
+        for (let j = m - 1; j >= 0; j -= 1) {
+          dp[i][j] = comparableToken(leftTokens[i], ignoreCase) === comparableToken(rightTokens[j], ignoreCase)
+            ? dp[i + 1][j + 1] + 1
+            : Math.max(dp[i + 1][j], dp[i][j + 1]);
+        }
+      }
+
+      let i = 0;
+      let j = 0;
+      let html = '';
+
+      while (i < n && j < m) {
+        if (comparableToken(leftTokens[i], ignoreCase) === comparableToken(rightTokens[j], ignoreCase)) {
+          html += highlightSql(leftTokens[i]);
+          i += 1;
+          j += 1;
+        } else if (dp[i + 1][j] >= dp[i][j + 1]) {
+          const paired = rightTokens[j] && !/\s/.test(leftTokens[i]) && !/\s/.test(rightTokens[j]) ? rightTokens[j] : '';
+          html += tokenDiffHtml(leftTokens[i], paired, cls, ignoreCase);
+          i += 1;
+        } else {
+          j += 1;
+        }
+      }
+
+      while (i < n) {
+        html += tokenDiffHtml(leftTokens[i], '', cls, ignoreCase);
+        i += 1;
+      }
+
+      return html || '&nbsp;';
+    }
+
+    function renderEditor(editor, nums, lines, otherLines, side, ignoreCase) {
+      const html = [];
+
+      for (let i = 0; i < lines.length; i += 1) {
+        const line = lines[i] || '';
+        const otherLine = otherLines[i] || '';
+        const same = plainDiffKey(line, ignoreCase) === plainDiffKey(otherLine, ignoreCase) && line.trim() && otherLine.trim();
+        const diff = !same && (line || otherLine);
+        const cls = diff ? (side === 'left' ? ' diff-left' : ' diff-right') : '';
+        html.push(`<div class="line${cls}">${diff ? charDiffHtml(line, otherLine, side, ignoreCase) : (highlightSql(line) || '&nbsp;')}</div>`);
+      }
+
+      editor.innerHTML = html.join('');
+      setLineNumbers(nums, lines.join('\n'));
+    }
+
+    function compareSql() {
+      const ignoreCase = ignoreCaseToggle.checked;
+      const leftFormatted = formatSql(plainText(leftEditor));
+      const rightFormatted = formatSql(plainText(rightEditor));
+      const leftLines = leftFormatted ? leftFormatted.split('\n') : [];
+      const rightLines = rightFormatted ? rightFormatted.split('\n') : [];
+      const aligned = alignLines(leftLines, rightLines, ignoreCase);
+
+      renderEditor(leftEditor, leftNums, aligned.alignedLeft, aligned.alignedRight, 'left', ignoreCase);
+      renderEditor(rightEditor, rightNums, aligned.alignedRight, aligned.alignedLeft, 'right', ignoreCase);
+      toastMsg(ignoreCase ? '已格式化并按忽略大小写对齐' : '已格式化并比较');
+    }
+
+    function clearAll() {
+      leftEditor.innerHTML = '';
+      rightEditor.innerHTML = '';
+      setLineNumbers(leftNums, '');
+      setLineNumbers(rightNums, '');
+      toastMsg('已清空');
+    }
+
+    function refreshNumbers(editor, nums) {
+      setLineNumbers(nums, plainText(editor));
+    }
+
+    function renderPastedSql(editor, nums, text) {
+      const formatted = formatSql(text);
+      const lines = formatted ? formatted.split('\n') : [''];
+      editor.innerHTML = lines
+        .map(line => `<div class="line">${highlightSql(line) || '&nbsp;'}</div>`)
+        .join('');
+      setLineNumbers(nums, formatted);
+    }
+
+    function plainPaste(editor, nums) {
+      editor.addEventListener('paste', event => {
+        const text = event.clipboardData && event.clipboardData.getData('text/plain');
+        if (!text) return;
+        event.preventDefault();
+        renderPastedSql(editor, nums, text);
+      });
+    }
+
+    function syncScroll(a, b) {
+      let lock = false;
+      a.addEventListener('scroll', () => {
+        if (lock) return;
+        lock = true;
+        b.scrollTop = a.scrollTop;
+        lock = false;
+      });
+    }
+
+    compareBtn.addEventListener('click', compareSql);
+    clearBtn.addEventListener('click', clearAll);
+    leftEditor.addEventListener('input', () => refreshNumbers(leftEditor, leftNums));
+    rightEditor.addEventListener('input', () => refreshNumbers(rightEditor, rightNums));
+    plainPaste(leftEditor, leftNums);
+    plainPaste(rightEditor, rightNums);
+    syncScroll(leftBox, rightBox);
+    syncScroll(rightBox, leftBox);
+  </script>
+</body>
+</html>
